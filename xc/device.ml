@@ -1726,18 +1726,32 @@ module Vusb = struct
     && not (List.mem driver_id (qom_list ~xs ~domid))then
       qmp_send_cmd domid Qmp.(Device_add Device.({driver; device=USB { USB.id=driver_id; params=None }})) |> ignore
 
-  let vusb_plug ~xs ~privileged ~domid ~id ~hostbus ~hostport ~version =
+  let vusb_plug ~xs ~privileged ~domid ~id ~hostbus ~hostport ~version ~speed =
     debug "vusb_plug: plug VUSB device %s" id;
-    let get_bus v =
-      if String.startswith "1" v then
-        "usb-bus.0"
-      else begin
-        (* Here plug usb controller according to the usb version*)
-        let usb_controller_driver = "usb-ehci" in
-        let driver_id = "ehci" in
-        vusb_controller_plug ~xs ~domid ~driver:usb_controller_driver ~driver_id;
-        Printf.sprintf "%s.0" driver_id;
-      end
+    let usb_bus0 = "usb-bus.0" in
+    let ehci0    = "ehci.0" in
+    let get_bus () =
+      let bus_from_speed =
+        match float_of_string_opt speed with
+        | None -> None
+        | Some speed -> if 0. < speed && speed <= 480. then
+                          Some usb_bus0
+                        else if 480. < speed then
+                          Some ehci0
+                        else
+                          None
+      in
+      let get_bus_from_version () =
+        match String.startswith "1" version with
+        | true  ->   usb_bus0
+        | false -> ( vusb_controller_plug ~xs ~domid ~driver:"usb-ehci" ~driver_id:"ehci";
+                     ehci0 )
+      in
+      match bus_from_speed with
+      | Some x -> x
+      | None ->
+        D.debug "vusb_plug: failed to get bus from usb speed: %s, for VUSB device %s. getting bus from version" speed id;
+        get_bus_from_version ()
     in
     if Qemu.is_running ~xs domid then
       begin
@@ -1752,7 +1766,7 @@ module Vusb = struct
                        { driver = "usb-host";
                          device = USB {
                            USB.id = id;
-                           params = Some USB.({bus = get_bus version; hostbus; hostport})
+                           params = Some USB.({bus = get_bus (); hostbus; hostport})
                          }
                        }
                     ))
