@@ -1656,8 +1656,12 @@ module Dm_Common = struct
     | VNC of disp_intf_opt * string option * bool * int * string option (* IP address, auto-allocate, port if previous false, keymap *)
     | SDL of disp_intf_opt * string (* X11 display *)
 
-  type media = Disk | Cdrom
-  let string_of_media = function Disk -> "disk" | Cdrom -> "cdrom"
+  type media = Disk | Cdrom | Floppy
+
+  let string_of_media = function
+  | Disk -> "disk"
+  | Cdrom -> "cdrom"
+  | Floppy -> "floppy"
 
   type info = {
     memory: int64;
@@ -1967,10 +1971,12 @@ module Dm_Common = struct
     | Disk, _   -> ["format=raw"]
     | Cdrom, "" -> []
     | Cdrom, _  -> ["format=raw"]
+    | Floppy, _ -> ["format=raw"]
 
   let lba_of_media = function
     | Disk  -> "force-lba=on"
     | Cdrom -> "force-lba=off"
+    | Floppy -> ""
 
 
   type disk_type_args = int * string * media -> string list
@@ -2756,9 +2762,14 @@ module Backend = struct
             ; Config.XenPlatform.device ~xs ~domid ~info
             ] in
 
-        let disks_cdrom, disks_other =
-          info.Dm_Common.disks
-          |> List.partition (function (_, _, Dm_Common.Cdrom) -> true | (_, _, _) -> false)
+        let disks_cdrom, disks_floppy, disks_other =
+          let acc (cdroms, floppies, other) ((_, _, media) as next) =
+            match media with
+            | Dm_Common.Cdrom  -> (next :: cdroms, floppies, other)
+            | Dm_Common.Floppy -> (cdroms, next :: floppies, other)
+            | Dm_Common.Disk   -> (cdroms, floppies, next :: other)
+          in
+          List.fold_left acc ([], [], []) info.Dm_Common.disks
         in
 
         let limit_emulated_disks disks =
@@ -2769,9 +2780,17 @@ module Backend = struct
             Xapi_stdext_std.Listext.List.take limit disks
           | _ -> disks
         in
-
         let disks' =
+          let qemu_floppy_args (index, path, media) =
+            ["-drive"; String.concat "," ([
+                sprintf "file=%s" path
+              ; "if=floppy"
+              ; sprintf "index=%i" index
+              ] @ Dm_Common.format_of_media media path)
+            ]
+          in
           [ List.map (List.assoc Dm_Common.ide Config.DISK.types) disks_cdrom
+          ; List.map qemu_floppy_args disks_floppy
           ; disks_other |> limit_emulated_disks |> List.map disk_interface ]
           |> List.concat |> List.concat
         in

@@ -1446,6 +1446,7 @@ module VM = struct
               match vbd.Vbd.ty, vbd.mode with
               | Vbd.Disk, ReadOnly -> None
               | Vbd.Disk, _        -> Some (index, path, Device.Dm.Disk)
+              | Vbd.Floppy, _      -> Some (index, path, Device.Dm.Floppy)
               | _                  -> Some (index, path, Device.Dm.Cdrom)
             else None
           ) vbds in
@@ -2562,14 +2563,22 @@ module VBD = struct
 
              (* If qemu is in a different domain to storage, attach disks to it *)
              let qemu_domid = Opt.default (this_domid ~xs) (get_stubdom ~xs frontend_domid) in
-             let qemu_frontend = match Device_number.spec device_number with
-               | Ide, n, _ when n < 4 ->
+             let qemu_frontend =
+               let maybe_create_vbd_backend () =
                  let index = Device_number.to_disk_number device_number in
                  begin match vbd.Vbd.backend with
                    | None   -> Some (index, Empty)
                    | Some _ -> Some (index, create_vbd_frontend ~xc ~xs task qemu_domid vdi)
                  end
-               | _,_,_ -> None in
+               in
+               match Device_number.spec device_number with
+               | Ide,    n, _ when 0 <= n && n < 4 -> maybe_create_vbd_backend ()
+               | Floppy, n, _ when 0 <= n && n < 2 -> maybe_create_vbd_backend ()
+               | Ide,    n, _                      -> D.warn "qemu_frontend: Ide index should be less than 4, but got: %i" n; None
+               | Floppy, n, _                      -> D.warn "qemu_frontend: floppy index should be less than 2, but got: %i" n; None
+               | Xen,    _, _                      -> None
+               | Scsi,   _, _                      -> None
+             in
              (* Remember what we've just done *)
              (* Dom0 doesn't have a vm_t - we don't need this currently, but when we have storage driver domains,
                 we will. Also this causes the SMRT tests to fail, as they demand the loopback VBDs *)

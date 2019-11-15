@@ -238,7 +238,7 @@ sig
     | VNC of disp_intf_opt * string option * bool * int * string option (* IP address, auto-allocate, port if previous false, keymap *)
     | SDL of disp_intf_opt * string (* X11 display *)
 
-  type media = Disk | Cdrom
+  type media = Disk | Cdrom | Floppy
 
   type info = {
     memory: int64;
