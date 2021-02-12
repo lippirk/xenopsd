@@ -59,7 +59,7 @@ jobs:
         uses: avsm/setup-ocaml@v1
         with:
           ocaml-version: ${{ steps.dotenv.outputs.ocaml_version_full }}
-          opam-repository: ${{ steps.dotenv.outputs.repository }}-0.150
+          opam-repository: ${{ steps.dotenv.outputs.repository }}
 
       - name: Update opam metadata
         run: |
